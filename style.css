@@ -19,6 +19,13 @@ button:disabled { cursor: wait; opacity: .6; }
 .metrics strong { font-size: 18px; }
 .metrics span { margin-top: 3px; color: #626f86; font-size: 12px; }
 .host-probe { border: 1px solid #dcdfe4; background: white; }
+.demo-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.demo-cell__icon { width: 16px; height: 16px; flex: 0 0 auto; fill: #e9f2ff; stroke: #0c66e4; stroke-width: 1.5; }
+.demo-cell__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.demo-cell__status { margin-left: auto; padding: 1px 4px; border-radius: 3px; color: #44546f; background: #f1f2f4; font-size: 10px; }
+.demo-cell__status--1 { color: #216e4e; background: #dcfff1; }
+.demo-cell__status--2 { color: #7f5f01; background: #fff7d6; }
+.demo-cell__status--3 { color: #5e4db2; background: #f3f0ff; }
 details { margin-top: 16px; color: #44546f; }
 
 /* Optional host-page invalidation case that stationary DOM was designed to improve. */

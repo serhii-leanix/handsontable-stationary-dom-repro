@@ -11,6 +11,12 @@ choose a Handsontable version, and click **Run smooth scroll**. Compare:
 - long tasks and their total duration;
 - total elapsed time for the same round-trip scroll.
 
+The workload selector offers two renderer variants:
+
+- **Synthetic CPU** keeps the original deterministic hash calculation used by the issue.
+- **SVG DOM** removes the artificial CPU loop and builds realistic cell DOM: a wrapper,
+  native SVG icon, text label, and status badge.
+
 The custom renderer models an application that associates expensive derived UI state with
 the rendered `TD` and source row. Handsontable 16.2's coordinate-aware node movement keeps
 those associations useful. Handsontable 18.1's stationary positional reuse makes the same

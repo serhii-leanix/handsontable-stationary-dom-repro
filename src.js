@@ -3,10 +3,17 @@ import './style.css';
 async function main() {
 const params = new URLSearchParams(location.search);
 const version = params.get('version') === '18.1.0' ? '18.1.0' : '16.2.0';
+const workload = params.get('workload') === 'svg' ? 'svg' : 'cpu';
 const versionSelect = document.querySelector('#version');
+const workloadSelect = document.querySelector('#workload');
 versionSelect.value = version;
+workloadSelect.value = workload;
 versionSelect.addEventListener('change', () => {
   params.set('version', versionSelect.value);
+  location.search = params.toString();
+});
+workloadSelect.addEventListener('change', () => {
+  params.set('workload', workloadSelect.value);
   location.search = params.toString();
 });
 
@@ -51,20 +58,54 @@ function deriveExpensiveValue(record, col) {
   return `${record.cells[col]} · ${hash >>> 0}`;
 }
 
+function createSvgCell(record, col) {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const wrapper = document.createElement('span');
+  wrapper.className = 'demo-cell';
+
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.classList.add('demo-cell__icon');
+  icon.setAttribute('viewBox', '0 0 16 16');
+  icon.setAttribute('aria-hidden', 'true');
+
+  const circle = document.createElementNS(namespace, 'circle');
+  circle.setAttribute('cx', '8');
+  circle.setAttribute('cy', '8');
+  circle.setAttribute('r', '6');
+
+  const check = document.createElementNS(namespace, 'path');
+  check.setAttribute('d', 'M5 8.2 7.1 10.3 11.5 5.9');
+  icon.append(circle, check);
+
+  const label = document.createElement('span');
+  label.className = 'demo-cell__label';
+  label.textContent = record.cells[col];
+
+  const status = document.createElement('span');
+  status.className = `demo-cell__status demo-cell__status--${record.id % 4}`;
+  status.textContent = ['Draft', 'Active', 'Review', 'Archived'][record.id % 4];
+
+  wrapper.append(icon, label, status);
+  return wrapper;
+}
+
 function expensiveRenderer(instance, td, row, col) {
   metrics.rendererCalls += 1;
   const record = data[row];
   const cached = cellCache.get(td);
+  const input = record.cells[col];
 
-  if (cached?.record === record && cached.col === col) {
-    td.textContent = cached.value;
+  if (cached?.record === record && cached.col === col && cached.input === input) {
     return td;
   }
 
   metrics.cacheMisses += 1;
-  const value = deriveExpensiveValue(record, col);
-  cellCache.set(td, { record, col, value });
-  td.textContent = value;
+  if (workload === 'svg') {
+    td.replaceChildren(createSvgCell(record, col));
+  } else {
+    td.textContent = deriveExpensiveValue(record, col);
+  }
+  cellCache.set(td, { record, col, input });
   return td;
 }
 
