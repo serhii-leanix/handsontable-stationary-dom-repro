@@ -1,5 +1,6 @@
 import './style.css';
 
+async function main() {
 const params = new URLSearchParams(location.search);
 const version = params.get('version') === '18.1.0' ? '18.1.0' : '16.2.0';
 const versionSelect = document.querySelector('#version');
@@ -156,3 +157,6 @@ function updateMetrics(elapsed = runStartedAt ? performance.now() - runStartedAt
 }
 
 updateMetrics();
+}
+
+main();
