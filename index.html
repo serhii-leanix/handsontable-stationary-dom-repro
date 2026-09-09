@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Handsontable stationary DOM scroll reproduction</title>
+  </head>
+  <body>
+    <main>
+      <h1>Stationary DOM scroll reproduction</h1>
+      <p class="intro">
+        Compare the same expensive, DOM-node-cached custom renderer in Handsontable
+        16.2 and 18.1. Each run performs the same smooth round-trip scroll.
+      </p>
+      <section class="controls">
+        <label>
+          Handsontable
+          <select id="version">
+            <option value="16.2.0">16.2.0</option>
+            <option value="18.1.0">18.1.0</option>
+          </select>
+        </label>
+        <label>
+          <input id="has-css" type="checkbox" />
+          Enable host-page <code>:has()</code> selectors
+        </label>
+        <button id="run" type="button">Run smooth scroll</button>
+        <button id="reset" type="button">Reset metrics</button>
+      </section>
+      <section class="metrics" aria-live="polite">
+        <div><strong id="renderer-calls">0</strong><span>renderer calls</span></div>
+        <div><strong id="cache-misses">0</strong><span>expensive cache misses</span></div>
+        <div><strong id="long-tasks">0</strong><span>long tasks</span></div>
+        <div><strong id="long-task-time">0 ms</strong><span>long-task time</span></div>
+        <div><strong id="p95-frame">0 ms</strong><span>p95 scroll frame</span></div>
+        <div><strong id="slow-frames">0</strong><span>frames over 50 ms</span></div>
+        <div><strong id="elapsed">0 ms</strong><span>run elapsed</span></div>
+      </section>
+      <div id="host-probe" class="host-probe"><div id="hot"></div></div>
+      <details>
+        <summary>What this isolates</summary>
+        <p>
+          The renderer stores an expensive derived value in a WeakMap keyed by the TD and
+          source record. This is representative of custom renderers that attach reusable UI
+          state to a cell. Coordinate-aware DOM recycling preserves those associations;
+          stationary positional reuse invalidates them as rows pass through the viewport.
+        </p>
+      </details>
+    </main>
+    <script type="module" src="/src.js"></script>
+  </body>
+</html>

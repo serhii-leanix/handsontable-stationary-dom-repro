@@ -1,0 +1,17 @@
+{
+  "name": "handsontable-stationary-dom-repro",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "latest",
+    "handsontable16": "npm:handsontable@16.2.0",
+    "handsontable18": "npm:handsontable@18.1.0",
+    "vite": "latest"
+  },
+  "devDependencies": {}
+}
