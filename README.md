@@ -12,6 +12,10 @@ with 162 px columns, 36 px rows, a row rendering offset of 10, and a column rend
 Each cell is an `OnPush` Angular component extending `HotCellRendererComponent`; it contains a native
 SVG, a text label, and a status badge. There is no synthetic CPU work.
 
+The `mode=snapshot` URL is retained for compatibility with the original shared link, but now runs the
+maintainer-recommended live component-container cache: entries are keyed by table and physical cell
+coordinates, moved only when necessary, and destroyed after leaving the rendered viewport.
+
 Click **Run identical smooth scroll** to animate `scrollTop` from 0 to 1000 over 2.5 seconds. The page
 reports renderer calls, Angular component creations, frame durations, and long tasks.
 

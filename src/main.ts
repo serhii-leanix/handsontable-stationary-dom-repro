@@ -1,6 +1,7 @@
 import 'zone.js';
 
 import {
+  ApplicationRef,
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
@@ -44,10 +45,16 @@ interface RunMetrics {
   framesOver50Ms: number;
 }
 
+interface CachedCell {
+  input: string;
+  componentRef: ComponentRef<CachedCellComponent>;
+  container: HTMLElement;
+}
+
 const counters = { rendererCalls: 0, componentCreations: 0 };
 
 @Component({
-  selector: 'app-snapshot-cell',
+  selector: 'app-cached-cell',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="demo-cell">
@@ -60,7 +67,7 @@ const counters = { rendererCalls: 0, componentCreations: 0 };
     </span>
   `,
 })
-class SnapshotCellComponent {
+class CachedCellComponent {
   readonly value = input.required<string>();
 }
 
@@ -95,7 +102,7 @@ class OfficialCellComponent extends HotCellRendererComponent {
       <p class="intro">Identical SVG-rich cells, dataset, viewport, and scroll path.</p>
 
       <nav aria-label="Renderer mode">
-        <a href="?mode=snapshot" [class.selected]="mode === 'snapshot'">HTML snapshot renderer</a>
+        <a href="?mode=snapshot" [class.selected]="mode === 'snapshot'">Recommended cached component renderer</a>
         <a href="?mode=official" [class.selected]="mode === 'official'">Official Angular component renderer</a>
       </nav>
 
@@ -121,16 +128,16 @@ class OfficialCellComponent extends HotCellRendererComponent {
   `,
 })
 class AppComponent implements AfterViewInit, OnDestroy {
+  private readonly applicationRef = inject(ApplicationRef);
   private readonly environmentInjector = inject(EnvironmentInjector);
   private readonly zone = inject(NgZone);
-  private readonly componentCache = new Map<string, ComponentRef<SnapshotCellComponent>>();
-  private tdState = new WeakMap<HTMLTableCellElement, string>();
+  private readonly componentCaches = new Map<HTMLTableElement, Map<string, CachedCell>>();
   private readonly hotTable = viewChild.required(HotTableComponent);
 
   readonly mode: RendererMode = params.get('mode') === 'snapshot' ? 'snapshot' : 'official';
   readonly modeLabel = this.mode === 'official'
     ? 'Official Angular component renderer'
-    : 'HTML snapshot renderer';
+    : 'Recommended cached component renderer';
   readonly hotVersion = Handsontable.version;
 
   readonly running = signal(false);
@@ -140,7 +147,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
     Array.from({ length: COLUMNS }, (_, column) => `Item ${row + 1}.${column + 1}`),
   );
 
-  private readonly snapshotRenderer: BaseRenderer = (
+  private readonly cachedComponentRenderer: BaseRenderer = (
     instance,
     td,
     row,
@@ -149,31 +156,47 @@ class AppComponent implements AfterViewInit, OnDestroy {
     value,
     cellProperties,
   ) => {
-    const text = String(value ?? '');
-    const state = `${row}:${column}:${text}`;
-    if (this.tdState.get(td) === state) {
-      return;
-    }
-    Handsontable.renderers.TextRenderer(instance, td, row, column, prop, '', cellProperties);
+    Handsontable.renderers.BaseRenderer(instance, td, row, column, prop, value, cellProperties);
+    const table = td.closest('table');
+    if (!table) return;
 
-    let componentRef = this.componentCache.get(text);
-    if (!componentRef) {
-      componentRef = createComponent(SnapshotCellComponent, {
+    let tableCache = this.componentCaches.get(table);
+    if (!tableCache) {
+      tableCache = new Map();
+      this.componentCaches.set(table, tableCache);
+    }
+
+    const key = `${instance.toPhysicalRow(row)}:${instance.toPhysicalColumn(column)}`;
+    const input = String(value ?? '');
+    let cached = tableCache.get(key);
+    if (!cached) {
+      const componentRef = createComponent(CachedCellComponent, {
         environmentInjector: this.environmentInjector,
       });
-      componentRef.setInput('value', text);
+      componentRef.setInput('value', input);
       componentRef.changeDetectorRef.detectChanges();
-      this.componentCache.set(text, componentRef);
+      this.applicationRef.attachView(componentRef.hostView);
+      cached = {
+        input,
+        componentRef,
+        container: componentRef.location.nativeElement as HTMLElement,
+      };
+      tableCache.set(key, cached);
       counters.componentCreations += 1;
     }
-
-    td.innerHTML = componentRef.location.nativeElement.innerHTML;
-    this.tdState.set(td, state);
+    if (cached.input !== input) {
+      cached.input = input;
+      cached.componentRef.setInput('value', input);
+      cached.componentRef.changeDetectorRef.detectChanges();
+    }
+    if (cached.container.parentNode !== td) {
+      td.replaceChildren(cached.container);
+    }
   };
 
   readonly settings: GridSettings = {
     columns: Array.from({ length: COLUMNS }, () => ({
-      renderer: this.mode === 'official' ? OfficialCellComponent : this.snapshotRenderer,
+      renderer: this.mode === 'official' ? OfficialCellComponent : this.cachedComponentRenderer,
     })),
     colHeaders: true,
     rowHeaders: true,
@@ -188,6 +211,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
     afterRenderer: () => {
       counters.rendererCalls += 1;
     },
+    afterViewRender: () => this.sweepDetachedComponents(),
     licenseKey: 'non-commercial-and-evaluation',
   };
 
@@ -203,11 +227,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
 
     this.running.set(true);
     this.progress.set('Preparing…');
-    for (const componentRef of this.componentCache.values()) {
-      componentRef.destroy();
-    }
-    this.componentCache.clear();
-    this.tdState = new WeakMap<HTMLTableCellElement, string>();
+    this.destroyCachedComponents();
     const scrollContainer = hot.rootElement.querySelector<HTMLElement>('.ht_master .wtHolder');
     if (!scrollContainer) {
       this.running.set(false);
@@ -293,10 +313,33 @@ class AppComponent implements AfterViewInit, OnDestroy {
     return { elapsedMs: 0, rendererCalls: 0, componentCreations: 0, longTasks: 0, longTaskTimeMs: 0, p95FrameMs: 0, framesOver50Ms: 0 };
   }
 
-  ngOnDestroy(): void {
-    for (const componentRef of this.componentCache.values()) {
-      componentRef.destroy();
+  private sweepDetachedComponents(): void {
+    for (const [table, tableCache] of this.componentCaches) {
+      for (const [key, cached] of tableCache) {
+        if (!cached.container.isConnected) {
+          this.destroyComponent(cached.componentRef);
+          tableCache.delete(key);
+        }
+      }
+      if (tableCache.size === 0) this.componentCaches.delete(table);
     }
+  }
+
+  private destroyCachedComponents(): void {
+    for (const tableCache of this.componentCaches.values()) {
+      for (const cached of tableCache.values()) this.destroyComponent(cached.componentRef);
+    }
+    this.componentCaches.clear();
+  }
+
+  private destroyComponent(componentRef: ComponentRef<CachedCellComponent>): void {
+    if (componentRef.hostView.destroyed) return;
+    this.applicationRef.detachView(componentRef.hostView);
+    componentRef.destroy();
+  }
+
+  ngOnDestroy(): void {
+    this.destroyCachedComponents();
   }
 }
 
