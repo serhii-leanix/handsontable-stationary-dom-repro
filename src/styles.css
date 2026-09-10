@@ -11,7 +11,7 @@
 body { margin: 0; }
 
 main {
-  width: min(1440px, calc(100% - 32px));
+  width: min(3300px, calc(100% - 32px));
   margin: 28px auto;
 }
 

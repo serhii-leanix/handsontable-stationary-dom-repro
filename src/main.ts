@@ -1,6 +1,7 @@
 import 'zone.js';
 
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
   ComponentRef,
@@ -14,17 +15,22 @@ import {
   viewChild,
 } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { GridSettings, HotCellRendererComponent, HotTableComponent } from '@handsontable/angular-wrapper';
+import { GridSettings, HotCellRendererComponent, HotTableComponent, HotTableModule } from '@handsontable/angular-wrapper';
 import Handsontable from 'handsontable';
 import { registerAllModules } from 'handsontable/registry';
 import type { BaseRenderer } from 'handsontable/renderers';
 
 registerAllModules();
 
-const ROWS = 5_000;
-const COLUMNS = 40;
-const SCROLL_ROWS = 1_200;
-const SCROLL_STEP = 8;
+const params = new URLSearchParams(location.search);
+const ROWS = Number(params.get('rows') ?? 114);
+const COLUMNS = Number(params.get('cols') ?? 128);
+const TABLE_WIDTH = Number(params.get('tableWidth') ?? 3_054);
+const TABLE_HEIGHT = Number(params.get('tableHeight') ?? 1_946);
+const COLUMN_WIDTH = Number(params.get('columnWidth') ?? 162);
+const ROW_HEIGHT = Number(params.get('rowHeight') ?? 36);
+const SCROLL_DISTANCE = 1_000;
+const SCROLL_DURATION = 2_500;
 
 type RendererMode = 'snapshot' | 'official';
 
@@ -81,11 +87,11 @@ class OfficialCellComponent extends HotCellRendererComponent {
 
 @Component({
   selector: 'app-root',
-  imports: [HotTableComponent],
+  imports: [HotTableModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <main>
-      <h1>Handsontable Angular renderer comparison</h1>
+      <h1>Handsontable {{ hotVersion }} Angular renderer</h1>
       <p class="intro">Identical SVG-rich cells, dataset, viewport, and scroll path.</p>
 
       <nav aria-label="Renderer mode">
@@ -101,7 +107,7 @@ class OfficialCellComponent extends HotCellRendererComponent {
         <button class="secondary" type="button" (click)="resetMetrics()" [disabled]="running()">Reset metrics</button>
       </section>
 
-      <hot-table [settings]="settings" />
+      <hot-table id="hot" [data]="data" [settings]="settings" />
 
       <section class="metrics" aria-live="polite">
         <div><span>Elapsed</span><strong>{{ metrics().elapsedMs.toFixed(1) }} ms</strong></div>
@@ -114,23 +120,25 @@ class OfficialCellComponent extends HotCellRendererComponent {
     </main>
   `,
 })
-class AppComponent implements OnDestroy {
+class AppComponent implements AfterViewInit, OnDestroy {
   private readonly environmentInjector = inject(EnvironmentInjector);
   private readonly zone = inject(NgZone);
   private readonly componentCache = new Map<string, ComponentRef<SnapshotCellComponent>>();
   private tdState = new WeakMap<HTMLTableCellElement, string>();
   private readonly hotTable = viewChild.required(HotTableComponent);
 
-  readonly mode: RendererMode = new URLSearchParams(location.search).get('mode') === 'official'
-    ? 'official'
-    : 'snapshot';
+  readonly mode: RendererMode = params.get('mode') === 'snapshot' ? 'snapshot' : 'official';
   readonly modeLabel = this.mode === 'official'
     ? 'Official Angular component renderer'
     : 'HTML snapshot renderer';
+  readonly hotVersion = Handsontable.version;
 
   readonly running = signal(false);
   readonly progress = signal('Running…');
   readonly metrics = signal<RunMetrics>(this.emptyMetrics());
+  readonly data = Array.from({ length: ROWS }, (_, row) =>
+    Array.from({ length: COLUMNS }, (_, column) => `Item ${row + 1}.${column + 1}`),
+  );
 
   private readonly snapshotRenderer: BaseRenderer = (
     instance,
@@ -164,25 +172,28 @@ class AppComponent implements OnDestroy {
   };
 
   readonly settings: GridSettings = {
-    data: Array.from({ length: ROWS }, (_, row) =>
-      Array.from({ length: COLUMNS }, (_, column) => `Item ${row + 1}.${column + 1}`),
-    ),
     columns: Array.from({ length: COLUMNS }, () => ({
       renderer: this.mode === 'official' ? OfficialCellComponent : this.snapshotRenderer,
     })),
     colHeaders: true,
     rowHeaders: true,
-    width: '100%',
-    height: 540,
-    colWidths: 180,
-    rowHeights: 34,
+    width: TABLE_WIDTH,
+    height: TABLE_HEIGHT,
+    colWidths: COLUMN_WIDTH,
+    rowHeights: ROW_HEIGHT,
     autoRowSize: false,
     autoColumnSize: false,
+    viewportRowRenderingOffset: 10,
+    viewportColumnRenderingOffset: 2,
     afterRenderer: () => {
       counters.rendererCalls += 1;
     },
     licenseKey: 'non-commercial-and-evaluation',
   };
+
+  ngAfterViewInit(): void {
+    (globalThis as typeof globalThis & { __hot?: Handsontable | null }).__hot = this.hotTable().hotInstance;
+  }
 
   async runBenchmark(): Promise<void> {
     const hot = this.hotTable().hotInstance;
@@ -227,19 +238,17 @@ class AppComponent implements OnDestroy {
     const started = performance.now();
 
     await this.zone.runOutsideAngular(async () => {
-      const path: number[] = [];
-      for (let row = 0; row <= SCROLL_ROWS; row += SCROLL_STEP) path.push(row);
-      for (let row = SCROLL_ROWS - SCROLL_STEP; row >= 0; row -= SCROLL_STEP) path.push(row);
-
-      for (let index = 0; index < path.length; index += 1) {
-        scrollContainer.scrollTop = path[index] * 28;
-        frameDurations.push(await this.nextFrameDuration());
-        if (index % 10 === 0) {
-          this.progress.set(`Running ${index + 1}/${path.length}…`);
-          this.publishMetrics(started, frameDurations, longTaskDurations);
-        }
+      let previousFrame = started;
+      while (true) {
+        const now = await this.nextFrameTimestamp();
+        frameDurations.push(now - previousFrame);
+        previousFrame = now;
+        const progress = Math.min(1, (now - started) / SCROLL_DURATION);
+        scrollContainer.scrollTop = SCROLL_DISTANCE * progress;
+        if (progress >= 1) break;
       }
     });
+    await new Promise(resolve => setTimeout(resolve, 250));
 
     observer?.disconnect();
     this.publishMetrics(started, frameDurations, longTaskDurations);
@@ -274,6 +283,10 @@ class AppComponent implements OnDestroy {
   private nextFrameDuration(): Promise<number> {
     const started = performance.now();
     return new Promise(resolve => requestAnimationFrame(() => resolve(performance.now() - started)));
+  }
+
+  private nextFrameTimestamp(): Promise<number> {
+    return new Promise(resolve => requestAnimationFrame(resolve));
   }
 
   private emptyMetrics(): RunMetrics {
