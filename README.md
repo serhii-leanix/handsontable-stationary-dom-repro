@@ -1,48 +1,35 @@
-# Handsontable stationary DOM scroll reproduction
+# Handsontable Angular renderer comparison
 
-Minimal reproduction for the custom-renderer scroll regression introduced by stationary
-positional DOM reuse.
+This reproduction compares two ways of rendering the same SVG-rich Angular cell with
+Handsontable 18.1:
 
-Open the [StackBlitz reproduction](https://stackblitz.com/github/serhii-leanix/handsontable-stationary-dom-repro),
-choose a Handsontable version, and click **Run smooth scroll**. Compare:
+- **HTML snapshot renderer** creates and caches detached Angular components, then copies
+  their rendered HTML into Handsontable cells.
+- **Official Angular component renderer** passes a `HotCellRendererComponent` directly to
+  `@handsontable/angular-wrapper`.
 
-- custom renderer calls;
-- expensive cache misses;
-- long tasks and their total duration;
-- total elapsed time for the same round-trip scroll.
+Open the [StackBlitz reproduction](https://stackblitz.com/github/serhii-leanix/handsontable-stationary-dom-repro/tree/feature/LUN-516-angular-renderer-repro?startScript=start),
+select either mode, and click **Run identical smooth scroll**. Both modes use the same
+5,000-row, 40-column dataset, viewport, cell template, and scroll path.
 
-The workload selector offers two renderer variants:
+The page reports elapsed time, renderer calls, Angular component creations, p95 frame
+duration, frames over 50 ms, and long tasks.
 
-- **Synthetic CPU** keeps the original deterministic hash calculation used by the issue.
-- **SVG DOM** removes the artificial CPU loop and builds realistic cell DOM: a wrapper,
-  native SVG icon, text label, and status badge.
+## Observed results
 
-The custom renderer models an application that associates expensive derived UI state with
-the rendered `TD` and source row. Handsontable 16.2's coordinate-aware node movement keeps
-those associations useful. Handsontable 18.1's stationary positional reuse makes the same
-DOM nodes represent changing source rows, producing repeated expensive cache misses.
+Representative browser runs produced:
 
-The optional `:has()` toggle represents the host-page invalidation case that motivated the
-stationary DOM implementation. The request is not to remove that strategy, but to provide a
-supported opt-in delta/coordinate-aware strategy for applications dominated by expensive
-custom renderers.
+| Renderer | Elapsed | Renderer calls | Angular components created | p95 frame | Frames >50 ms | Long tasks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| HTML snapshot | 4,241–4,446 ms | 59,400 | 8,892 | 17.8–20.6 ms | 1–2 | 1 |
+| Official Angular component | 3,266 ms | 59,400 | 54 | 12.6 ms | 0 | 0 |
 
-## Example result
-
-One automated run in headless Chrome on the same machine and viewport produced:
-
-| Version | Renderer calls | Expensive cache misses | p95 scroll frame | Frames >50 ms | Long-task time |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 16.2.0 | 7,204 | 1,530 | 47.3 ms | 0 | 0 ms |
-| 18.1.0 | 6,230 | 6,230 | 83.9 ms | 89 | 5,800 ms |
-
-Exact timings are hardware-dependent. The invariant signal is the cache-miss ratio: with
-stationary positional nodes, every rendered cell represents changing source data while
-scrolling, so every renderer invocation becomes an expensive miss.
+Exact timings depend on the browser and hardware. The stable signal is the amount of
+renderer and Angular component work performed for the identical scroll.
 
 ## Local use
 
 ```sh
 npm install
-npm run dev
+npm start
 ```
