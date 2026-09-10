@@ -3,17 +3,26 @@ import './style.css';
 async function main() {
 const params = new URLSearchParams(location.search);
 const version = params.get('version') === '18.1.0' ? '18.1.0' : '16.2.0';
-const workload = params.get('workload') === 'svg' ? 'svg' : 'cpu';
+const scenario = params.get('scenario') === 'headers' ? 'headers' : 'rebuild';
+const nestedHeadersMode = ['off', 'groups-of-3', 'trailing-group'].includes(params.get('nestedHeaders'))
+  ? params.get('nestedHeaders')
+  : 'off';
 const versionSelect = document.querySelector('#version');
-const workloadSelect = document.querySelector('#workload');
+const scenarioSelect = document.querySelector('#scenario');
+const nestedHeadersSelect = document.querySelector('#nested-headers');
 versionSelect.value = version;
-workloadSelect.value = workload;
+scenarioSelect.value = scenario;
+nestedHeadersSelect.value = nestedHeadersMode;
 versionSelect.addEventListener('change', () => {
   params.set('version', versionSelect.value);
   location.search = params.toString();
 });
-workloadSelect.addEventListener('change', () => {
-  params.set('workload', workloadSelect.value);
+scenarioSelect.addEventListener('change', () => {
+  params.set('scenario', scenarioSelect.value);
+  location.search = params.toString();
+});
+nestedHeadersSelect.addEventListener('change', () => {
+  params.set('nestedHeaders', nestedHeadersSelect.value);
   location.search = params.toString();
 });
 
@@ -41,22 +50,12 @@ const metrics = {
   longTasks: 0,
   longTaskTime: 0,
   frameTimes: [],
+  containerMoves: 0,
+  maxRenderedColumns: 0,
+  maxRenderedCells: 0,
 };
 let runStartedAt = 0;
-const cellCache = new WeakMap();
-
-function deriveExpensiveValue(record, col) {
-  let hash = 2166136261;
-  const source = `${record.id}:${col}:${record.cells[col]}`;
-  // Deliberately CPU-heavy deterministic work, representative of rich custom renderers.
-  for (let repeat = 0; repeat < 40_000; repeat += 1) {
-    for (let index = 0; index < source.length; index += 1) {
-      hash ^= source.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-  }
-  return `${record.cells[col]} · ${hash >>> 0}`;
-}
+let recordCache = new WeakMap();
 
 function createSvgCell(record, col) {
   const namespace = 'http://www.w3.org/2000/svg';
@@ -92,35 +91,62 @@ function createSvgCell(record, col) {
 function expensiveRenderer(instance, td, row, col) {
   metrics.rendererCalls += 1;
   const record = data[row];
-  const cached = cellCache.get(td);
   const input = record.cells[col];
 
-  if (cached?.record === record && cached.col === col && cached.input === input) {
-    return td;
+  let rowCache = recordCache.get(record);
+  if (!rowCache) {
+    rowCache = new Map();
+    recordCache.set(record, rowCache);
   }
 
-  metrics.cacheMisses += 1;
-  if (workload === 'svg') {
-    td.replaceChildren(createSvgCell(record, col));
-  } else {
-    td.textContent = deriveExpensiveValue(record, col);
+  let cached = rowCache.get(col);
+  if (!cached || cached.input !== input) {
+    cached = { input, container: createSvgCell(record, col) };
+    rowCache.set(col, cached);
+    metrics.cacheMisses += 1;
   }
-  cellCache.set(td, { record, col, input });
+
+  if (td.childNodes.length !== 1 || td.firstChild !== cached.container) {
+    td.replaceChildren(cached.container);
+    metrics.containerMoves += 1;
+  }
   return td;
 }
 
-const hot = new Handsontable(document.querySelector('#hot'), {
+function createNestedHeaders(mode) {
+  if (mode === 'off') return false;
+  const leafHeaders = Array.from({ length: COLS }, (_, col) => `Column ${col + 1}`);
+  if (mode === 'trailing-group') {
+    return [
+      [...Array.from({ length: COLS - 3 }, (_, col) => `Column ${col + 1}`), { label: 'Trailing group', colspan: 3 }],
+      leafHeaders,
+    ];
+  }
+
+  const groups = [];
+  for (let start = 0; start < COLS; start += 3) {
+    const size = Math.min(3, COLS - start);
+    groups.push(size === 1 ? `Column ${start + 1}` : { label: `Group ${Math.floor(start / 3) + 1}`, colspan: size });
+  }
+  return [groups, leafHeaders];
+}
+
+let hot;
+hot = new Handsontable(document.querySelector('#hot'), {
   data,
   width: '100%',
   height: 540,
   rowHeaders: true,
   colHeaders: true,
+  columns: Array.from({ length: COLS }, (_, col) => ({ data: `cells.${col}` })),
   colWidths: 130,
   rowHeights: 28,
   viewportRowRenderingOffset: 10,
   viewportColumnRenderingOffset: 2,
+  nestedHeaders: createNestedHeaders(nestedHeadersMode),
   licenseKey: 'non-commercial-and-evaluation',
   cells: () => ({ renderer: expensiveRenderer }),
+  afterRender: updateDomStats,
 });
 
 const observer = new PerformanceObserver((list) => {
@@ -132,10 +158,6 @@ const observer = new PerformanceObserver((list) => {
 });
 observer.observe({ type: 'longtask', buffered: true });
 
-document.querySelector('#has-css').addEventListener('change', (event) => {
-  document.body.classList.toggle('with-has-css', event.target.checked);
-});
-
 document.querySelector('#reset').addEventListener('click', resetMetrics);
 document.querySelector('#run').addEventListener('click', runSmoothScroll);
 
@@ -145,6 +167,10 @@ function resetMetrics() {
   metrics.longTasks = 0;
   metrics.longTaskTime = 0;
   metrics.frameTimes = [];
+  metrics.containerMoves = 0;
+  metrics.maxRenderedColumns = 0;
+  metrics.maxRenderedCells = 0;
+  recordCache = new WeakMap();
   runStartedAt = 0;
   performance.clearResourceTimings();
   updateMetrics();
@@ -165,6 +191,30 @@ async function runSmoothScroll() {
   }
   for (let row = 1_200; row >= 0; row -= 8) {
     scrollContainer.scrollTop = row * 28;
+    metrics.frameTimes.push(await nextFrameDuration());
+  }
+
+  if (scenario === 'rebuild') {
+    observer.disconnect();
+    updateMetrics(performance.now() - runStartedAt);
+    button.disabled = false;
+    return;
+  }
+
+  for (let column = 0; column < COLS; column += 1) {
+    scrollContainer.scrollLeft = column * 130;
+    metrics.frameTimes.push(await nextFrameDuration());
+  }
+  for (let row = 0; row <= 1_200; row += 8) {
+    scrollContainer.scrollTop = row * 28;
+    metrics.frameTimes.push(await nextFrameDuration());
+  }
+  for (let row = 1_200; row >= 0; row -= 8) {
+    scrollContainer.scrollTop = row * 28;
+    metrics.frameTimes.push(await nextFrameDuration());
+  }
+  for (let column = COLS - 1; column >= 0; column -= 1) {
+    scrollContainer.scrollLeft = column * 130;
     metrics.frameTimes.push(await nextFrameDuration());
   }
 
@@ -190,11 +240,22 @@ function updateMetrics(elapsed = runStartedAt ? performance.now() - runStartedAt
   const p95Frame = sortedFrames[Math.floor(sortedFrames.length * 0.95)] ?? 0;
   document.querySelector('#renderer-calls').textContent = metrics.rendererCalls.toLocaleString();
   document.querySelector('#cache-misses').textContent = metrics.cacheMisses.toLocaleString();
+  document.querySelector('#container-moves').textContent = metrics.containerMoves.toLocaleString();
   document.querySelector('#long-tasks').textContent = metrics.longTasks.toLocaleString();
   document.querySelector('#long-task-time').textContent = `${Math.round(metrics.longTaskTime).toLocaleString()} ms`;
   document.querySelector('#p95-frame').textContent = `${p95Frame.toFixed(1)} ms`;
   document.querySelector('#slow-frames').textContent = metrics.frameTimes.filter((duration) => duration > 50).length.toLocaleString();
   document.querySelector('#elapsed').textContent = `${Math.round(elapsed).toLocaleString()} ms`;
+  updateDomStats();
+}
+
+function updateDomStats() {
+  const renderedColumns = hot?.countRenderedCols() ?? 0;
+  const renderedCells = renderedColumns * (hot?.countRenderedRows() ?? 0);
+  metrics.maxRenderedColumns = Math.max(metrics.maxRenderedColumns, renderedColumns);
+  metrics.maxRenderedCells = Math.max(metrics.maxRenderedCells, renderedCells);
+  document.querySelector('#rendered-columns').textContent = metrics.maxRenderedColumns.toLocaleString();
+  document.querySelector('#rendered-cells').textContent = metrics.maxRenderedCells.toLocaleString();
 }
 
 updateMetrics();

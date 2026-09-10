@@ -7,10 +7,10 @@
   </head>
   <body>
     <main>
-      <h1>Stationary DOM scroll reproduction</h1>
+      <h1>Handsontable 16.2 vs 18.1 rendering</h1>
       <p class="intro">
-        Compare the same expensive, DOM-node-cached custom renderer in Handsontable
-        16.2 and 18.1. Each run performs the same smooth round-trip scroll.
+        Compare the same realistic SVG-rich renderer and identical smooth scroll on 40 columns.
+        Toggle nested headers to expose their effect on the rendered viewport.
       </p>
       <section class="controls">
         <label>
@@ -21,15 +21,19 @@
           </select>
         </label>
         <label>
-          Renderer workload
-          <select id="workload">
-            <option value="cpu">Synthetic CPU</option>
-            <option value="svg">SVG DOM</option>
+          Scenario
+          <select id="scenario">
+            <option value="rebuild">Vertical: component movement</option>
+            <option value="headers">2D: nested-header cost</option>
           </select>
         </label>
         <label>
-          <input id="has-css" type="checkbox" />
-          Enable host-page <code>:has()</code> selectors
+          Nested headers
+          <select id="nested-headers">
+            <option value="off">Disabled</option>
+            <option value="groups-of-3">Many groups of 3</option>
+            <option value="trailing-group">One group of 3 at the end</option>
+          </select>
         </label>
         <button id="run" type="button">Run smooth scroll</button>
         <button id="reset" type="button">Reset metrics</button>
@@ -37,21 +41,45 @@
       <section class="metrics" aria-live="polite">
         <div><strong id="renderer-calls">0</strong><span>renderer calls</span></div>
         <div><strong id="cache-misses">0</strong><span>cache misses / DOM rebuilds</span></div>
+        <div><strong id="container-moves">0</strong><span>cached DOM moves</span></div>
         <div><strong id="long-tasks">0</strong><span>long tasks</span></div>
         <div><strong id="long-task-time">0 ms</strong><span>long-task time</span></div>
         <div><strong id="p95-frame">0 ms</strong><span>p95 scroll frame</span></div>
         <div><strong id="slow-frames">0</strong><span>frames over 50 ms</span></div>
         <div><strong id="elapsed">0 ms</strong><span>run elapsed</span></div>
+        <div><strong id="rendered-columns">0</strong><span>max rendered master columns</span></div>
+        <div><strong id="rendered-cells">0</strong><span>max rendered master cells</span></div>
       </section>
       <div id="host-probe" class="host-probe"><div id="hot"></div></div>
-      <details>
-        <summary>What this isolates</summary>
+      <section class="findings">
+        <h2>What the comparison isolates</h2>
         <p>
-          Both workloads use a WeakMap keyed by the TD and source record. Synthetic CPU
-          reproduces an expensive derived value. SVG DOM creates a wrapper, native SVG icon,
-          label, and status only on a cache miss, with no artificial CPU loop. Coordinate-aware
-          DOM recycling preserves that rendered state; stationary positional reuse invalidates
-          it as rows pass through the viewport.
+          <strong>Component movement:</strong> this implements the maintainer's recipe. A content
+          container is cached by record and column, then moved into whichever TD currently displays
+          that logical cell. The vertical scenario isolates the remaining reparenting cost.
+        </p>
+        <p>
+          <strong>Nested headers:</strong> compare realistic groups of three with a single group
+          placed only at the right edge. The 2D scenario visits both horizontal edges, exposing
+          viewport expansion without forcing all 40 columns into the DOM.
+        </p>
+      </section>
+      <details>
+        <summary>How the metrics are collected</summary>
+        <p>
+          The renderer uses a WeakMap keyed by the TD and source record. A cache miss performs
+          real DOM work only: it creates a wrapper, native SVG icon, label, and status badge.
+          There is no synthetic CPU loop. Coordinate-aware DOM recycling preserves the rendered
+          state, while stationary positional reuse invalidates it as rows pass through the viewport.
+          The nested-header case groups all 40 columns so the viewport-expansion cost is directly
+          visible in the rendered-column and rendered-cell counters.
+        </p>
+        <p>
+          The benchmark performs the same vertical round trip at the left edge, scrolls through
+          all 40 columns, repeats the vertical round trip at the right edge, and returns left.
+          It waits for one animation frame after every step. Frame durations come from
+          requestAnimationFrame; long tasks come from the browser Long Tasks API; DOM rebuilds
+          are counted only when a new SVG-rich container is constructed.
         </p>
       </details>
     </main>
