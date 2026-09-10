@@ -1,31 +1,39 @@
-# Handsontable Angular renderer comparison
+# Handsontable official Angular renderer benchmark
 
-This reproduction compares two ways of rendering the same SVG-rich Angular cell with
-Handsontable 18.1:
+This reproduction compares the official Angular cell renderer in Handsontable 16.2 and 18.1.
+The application source, Angular 20.3, cell component, data, geometry, and vertical scroll are identical;
+only `handsontable` and `@handsontable/angular-wrapper` change.
 
-- **HTML snapshot renderer** creates and caches detached Angular components, then copies
-  their rendered HTML into Handsontable cells.
-- **Official Angular component renderer** passes a `HotCellRendererComponent` directly to
-  `@handsontable/angular-wrapper`.
+- [Handsontable 16.2 StackBlitz](https://stackblitz.com/github/serhii-leanix/handsontable-stationary-dom-repro/tree/feature/LUN-516-angular-renderer-16-benchmark?startScript=start)
+- [Handsontable 18.1 StackBlitz](https://stackblitz.com/github/serhii-leanix/handsontable-stationary-dom-repro/tree/feature/LUN-516-angular-renderer-repro?startScript=start)
 
-Open the [StackBlitz reproduction](https://stackblitz.com/github/serhii-leanix/handsontable-stationary-dom-repro/tree/feature/LUN-516-angular-renderer-repro?startScript=start),
-select either mode, and click **Run identical smooth scroll**. Both modes use the same
-5,000-row, 40-column dataset, viewport, cell template, and scroll path.
+Each table has 114 rows and 128 explicitly configured columns. The viewport is 3054×1946 px,
+with 162 px columns, 36 px rows, a row rendering offset of 10, and a column rendering offset of 2.
+Each cell is an `OnPush` Angular component extending `HotCellRendererComponent`; it contains a native
+SVG, a text label, and a status badge. There is no synthetic CPU work.
 
-The page reports elapsed time, renderer calls, Angular component creations, p95 frame
-duration, frames over 50 ms, and long tasks.
+Click **Run identical smooth scroll** to animate `scrollTop` from 0 to 1000 over 2.5 seconds. The page
+reports renderer calls, Angular component creations, frame durations, and long tasks.
 
-## Observed results
+## Representative production-build results
 
-Representative browser runs produced:
+The table below contains medians from five automated runs using the same Chromium viewport.
 
-| Renderer | Elapsed | Renderer calls | Angular components created | p95 frame | Frames >50 ms | Long tasks |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| HTML snapshot | 4,241–4,446 ms | 59,400 | 8,892 | 17.8–20.6 ms | 1–2 | 1 |
-| Official Angular component | 3,266 ms | 59,400 | 54 | 12.6 ms | 0 | 0 |
+| Metric | Pure JS, HoT 18.1 | Angular, HoT 16.2 | Angular, HoT 18.1 |
+| --- | ---: | ---: | ---: |
+| Renderer calls | 1,575 | 1,575 | 1,575 |
+| Script | 56 ms | 969 ms | 136 ms |
+| Long-task time | 82 ms | 1,005 ms | 195 ms |
+| Longest task | 76 ms | 967 ms | 148 ms |
+| p95 frame | 41.6 ms | 33.5 ms¹ | 58.3 ms |
 
-Exact timings depend on the browser and hardware. The stable signal is the amount of
-renderer and Angular component work performed for the identical scroll.
+¹ The 16.2 p95 is deceptively low because a single 0.6–1.6 second task blocks animation-frame delivery.
+The maximum frame and long-task duration show the stall.
+
+In a fresh forward run with 3,129 renderer calls, 16.2 created 3,129 Angular components. The 18.1
+wrapper created only 231 while growing the physical viewport pool, and subsequent warmed runs added none.
+This confirms that 18.1's renderer reuse fixes the 16.2 component churn, while the official Angular path
+still costs more than the equivalent pure-JavaScript renderer.
 
 ## Local use
 
