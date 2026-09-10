@@ -33,7 +33,7 @@ const ROW_HEIGHT = Number(params.get('rowHeight') ?? 36);
 const SCROLL_DISTANCE = 1_000;
 const SCROLL_DURATION = 2_500;
 
-type RendererMode = 'snapshot' | 'official';
+type RendererMode = 'snapshot' | 'recommended' | 'official';
 
 interface RunMetrics {
   elapsedMs: number;
@@ -102,7 +102,8 @@ class OfficialCellComponent extends HotCellRendererComponent {
       <p class="intro">Identical SVG-rich cells, dataset, viewport, and scroll path.</p>
 
       <nav aria-label="Renderer mode">
-        <a href="?mode=snapshot" [class.selected]="mode === 'snapshot'">Recommended cached component renderer</a>
+        <a href="?mode=snapshot" [class.selected]="mode === 'snapshot'">Legacy HTML snapshot renderer</a>
+        <a href="?mode=recommended" [class.selected]="mode === 'recommended'">Recommended cached component renderer</a>
         <a href="?mode=official" [class.selected]="mode === 'official'">Official Angular component renderer</a>
       </nav>
 
@@ -131,13 +132,21 @@ class AppComponent implements AfterViewInit, OnDestroy {
   private readonly applicationRef = inject(ApplicationRef);
   private readonly environmentInjector = inject(EnvironmentInjector);
   private readonly zone = inject(NgZone);
+  private readonly snapshotComponents = new Map<string, ComponentRef<CachedCellComponent>>();
+  private snapshotTdState = new WeakMap<HTMLTableCellElement, string>();
   private readonly componentCaches = new Map<HTMLTableElement, Map<string, CachedCell>>();
   private readonly hotTable = viewChild.required(HotTableComponent);
 
-  readonly mode: RendererMode = params.get('mode') === 'snapshot' ? 'snapshot' : 'official';
-  readonly modeLabel = this.mode === 'official'
-    ? 'Official Angular component renderer'
-    : 'Recommended cached component renderer';
+  readonly mode: RendererMode = params.get('mode') === 'snapshot'
+    ? 'snapshot'
+    : params.get('mode') === 'recommended'
+      ? 'recommended'
+      : 'official';
+  readonly modeLabel = this.mode === 'snapshot'
+    ? 'Legacy HTML snapshot renderer'
+    : this.mode === 'recommended'
+      ? 'Recommended cached component renderer'
+      : 'Official Angular component renderer';
   readonly hotVersion = Handsontable.version;
 
   readonly running = signal(false);
@@ -146,6 +155,35 @@ class AppComponent implements AfterViewInit, OnDestroy {
   readonly data = Array.from({ length: ROWS }, (_, row) =>
     Array.from({ length: COLUMNS }, (_, column) => `Item ${row + 1}.${column + 1}`),
   );
+
+  private readonly snapshotRenderer: BaseRenderer = (
+    instance,
+    td,
+    row,
+    column,
+    prop,
+    value,
+    cellProperties,
+  ) => {
+    const input = String(value ?? '');
+    const state = `${row}:${column}:${input}`;
+    if (this.snapshotTdState.get(td) === state) return;
+
+    Handsontable.renderers.TextRenderer(instance, td, row, column, prop, '', cellProperties);
+    let componentRef = this.snapshotComponents.get(input);
+    if (!componentRef) {
+      componentRef = createComponent(CachedCellComponent, {
+        environmentInjector: this.environmentInjector,
+      });
+      componentRef.setInput('value', input);
+      componentRef.changeDetectorRef.detectChanges();
+      this.snapshotComponents.set(input, componentRef);
+      counters.componentCreations += 1;
+    }
+
+    td.innerHTML = componentRef.location.nativeElement.innerHTML;
+    this.snapshotTdState.set(td, state);
+  };
 
   private readonly cachedComponentRenderer: BaseRenderer = (
     instance,
@@ -196,7 +234,11 @@ class AppComponent implements AfterViewInit, OnDestroy {
 
   readonly settings: GridSettings = {
     columns: Array.from({ length: COLUMNS }, () => ({
-      renderer: this.mode === 'official' ? OfficialCellComponent : this.cachedComponentRenderer,
+      renderer: this.mode === 'official'
+        ? OfficialCellComponent
+        : this.mode === 'recommended'
+          ? this.cachedComponentRenderer
+          : this.snapshotRenderer,
     })),
     colHeaders: true,
     rowHeaders: true,
@@ -211,7 +253,9 @@ class AppComponent implements AfterViewInit, OnDestroy {
     afterRenderer: () => {
       counters.rendererCalls += 1;
     },
-    afterViewRender: () => this.sweepDetachedComponents(),
+    afterViewRender: () => {
+      if (this.mode === 'recommended') this.sweepDetachedComponents();
+    },
     licenseKey: 'non-commercial-and-evaluation',
   };
 
@@ -227,6 +271,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
 
     this.running.set(true);
     this.progress.set('Preparing…');
+    this.destroySnapshotComponents();
     this.destroyCachedComponents();
     const scrollContainer = hot.rootElement.querySelector<HTMLElement>('.ht_master .wtHolder');
     if (!scrollContainer) {
@@ -332,6 +377,12 @@ class AppComponent implements AfterViewInit, OnDestroy {
     this.componentCaches.clear();
   }
 
+  private destroySnapshotComponents(): void {
+    for (const componentRef of this.snapshotComponents.values()) componentRef.destroy();
+    this.snapshotComponents.clear();
+    this.snapshotTdState = new WeakMap<HTMLTableCellElement, string>();
+  }
+
   private destroyComponent(componentRef: ComponentRef<CachedCellComponent>): void {
     if (componentRef.hostView.destroyed) return;
     this.applicationRef.detachView(componentRef.hostView);
@@ -339,6 +390,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.destroySnapshotComponents();
     this.destroyCachedComponents();
   }
 }
