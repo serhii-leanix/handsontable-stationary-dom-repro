@@ -115,8 +115,6 @@ class OfficialCellComponent extends HotCellRendererComponent {
         <button class="secondary" type="button" (click)="resetMetrics()" [disabled]="running()">Reset metrics</button>
       </section>
 
-      <hot-table id="hot" [data]="data" [settings]="settings" />
-
       <section class="metrics" aria-live="polite">
         <div><span>Elapsed</span><strong>{{ metrics().elapsedMs.toFixed(1) }} ms</strong></div>
         <div><span>Renderer calls</span><strong>{{ metrics().rendererCalls }}</strong></div>
@@ -125,6 +123,8 @@ class OfficialCellComponent extends HotCellRendererComponent {
         <div><span>Frames &gt; 50 ms</span><strong>{{ metrics().framesOver50Ms }}</strong></div>
         <div><span>Long tasks</span><strong>{{ metrics().longTasks }} / {{ metrics().longTaskTimeMs.toFixed(1) }} ms</strong></div>
       </section>
+
+      <hot-table id="hot" [data]="data" [settings]="settings" />
     </main>
   `,
 })
