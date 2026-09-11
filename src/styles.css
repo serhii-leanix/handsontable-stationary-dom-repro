@@ -28,6 +28,14 @@ nav a {
   background: white;
 }
 nav a.selected { border-color: #315ee7; color: #234ac2; background: #eef2ff; }
+.scenario-note {
+  max-width: 900px;
+  margin: -2px 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid #d97706;
+  color: #713f12;
+  background: #fffbeb;
+}
 
 .toolbar {
   display: flex;
@@ -35,7 +43,7 @@ nav a.selected { border-color: #315ee7; color: #234ac2; background: #eef2ff; }
   gap: 10px;
   margin-bottom: 12px;
 }
-.toolbar div { margin-right: auto; }
+.toolbar div:last-of-type { margin-right: auto; }
 
 button {
   padding: 10px 14px;

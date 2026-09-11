@@ -32,6 +32,8 @@ const COLUMN_WIDTH = Number(params.get('columnWidth') ?? 162);
 const ROW_HEIGHT = Number(params.get('rowHeight') ?? 36);
 const SCROLL_DISTANCE = 1_000;
 const SCROLL_DURATION = 2_500;
+const renderMode = params.get('renderMode') === 'always' ? 'always' : 'onChange';
+const mergeCellsEnabled = params.get('mergeCells') === 'on';
 
 type RendererMode = 'snapshot' | 'recommended' | 'official';
 
@@ -102,13 +104,26 @@ class OfficialCellComponent extends HotCellRendererComponent {
       <p class="intro">Identical SVG-rich cells, dataset, viewport, and scroll path.</p>
 
       <nav aria-label="Renderer mode">
-        <a href="?mode=snapshot" [class.selected]="mode === 'snapshot'">Legacy HTML snapshot renderer</a>
-        <a href="?mode=recommended" [class.selected]="mode === 'recommended'">Recommended cached component renderer</a>
-        <a href="?mode=official" [class.selected]="mode === 'official'">Official Angular component renderer</a>
+        <a [href]="rendererHref('snapshot')" [class.selected]="mode === 'snapshot'">Legacy HTML snapshot renderer</a>
+        <a [href]="rendererHref('recommended')" [class.selected]="mode === 'recommended'">Recommended cached component renderer</a>
+        <a [href]="rendererHref('official')" [class.selected]="mode === 'official'">Official Angular component renderer</a>
       </nav>
+
+      <nav aria-label="Engine scenario">
+        <a [href]="scenarioHref('always', false)" [class.selected]="renderMode === 'always' && !mergeCellsEnabled">PR default</a>
+        <a [href]="scenarioHref('onChange', false)" [class.selected]="renderMode === 'onChange' && !mergeCellsEnabled">PR + renderMode: onChange</a>
+        <a [href]="scenarioHref('onChange', true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled">PR + onChange + mergeCells</a>
+      </nav>
+      @if (mergeCellsEnabled) {
+        <p class="scenario-note">
+          This real 2 × 2 merge requires multi-pass layout. The PR intentionally disables stationary row recycling,
+          so <code>onChange</code> cannot skip renderer calls in this scenario.
+        </p>
+      }
 
       <section class="toolbar">
         <div><strong>Mode:</strong> {{ modeLabel }}</div>
+        <div><strong>Engine:</strong> {{ renderMode }} · mergeCells {{ mergeCellsEnabled ? 'on' : 'off' }}</div>
         <button type="button" (click)="runBenchmark()" [disabled]="running()">
           {{ running() ? progress() : 'Run identical smooth scroll' }}
         </button>
@@ -148,6 +163,8 @@ class AppComponent implements AfterViewInit, OnDestroy {
       ? 'Recommended cached component renderer'
       : 'Official Angular component renderer';
   readonly hotVersion = Handsontable.version;
+  readonly renderMode = renderMode;
+  readonly mergeCellsEnabled = mergeCellsEnabled;
 
   readonly running = signal(false);
   readonly progress = signal('Running…');
@@ -250,6 +267,8 @@ class AppComponent implements AfterViewInit, OnDestroy {
     autoColumnSize: false,
     viewportRowRenderingOffset: 10,
     viewportColumnRenderingOffset: 2,
+    renderMode,
+    mergeCells: mergeCellsEnabled ? [{ row: 5, col: 1, rowspan: 2, colspan: 2 }] : false,
     afterRenderer: () => {
       counters.rendererCalls += 1;
     },
@@ -261,6 +280,19 @@ class AppComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     (globalThis as typeof globalThis & { __hot?: Handsontable | null }).__hot = this.hotTable().hotInstance;
+  }
+
+  rendererHref(mode: RendererMode): string {
+    const next = new URLSearchParams(params);
+    next.set('mode', mode);
+    return `?${next.toString()}`;
+  }
+
+  scenarioHref(nextRenderMode: 'always' | 'onChange', nextMergeCells: boolean): string {
+    const next = new URLSearchParams(params);
+    next.set('renderMode', nextRenderMode);
+    next.set('mergeCells', nextMergeCells ? 'on' : 'off');
+    return `?${next.toString()}`;
   }
 
   async runBenchmark(): Promise<void> {
