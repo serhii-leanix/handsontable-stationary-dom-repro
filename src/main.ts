@@ -35,6 +35,16 @@ const SCROLL_DURATION = 2_500;
 const renderMode = params.get('renderMode') === 'always' ? 'always' : 'onChange';
 const mergeCellsEnabled = params.get('mergeCells') === 'on';
 const experimentalMergeRecycling = params.get('mergePatch') === 'on';
+const richWorkload = params.get('workload') === 'rich';
+const denseMergeProfile = params.get('mergeProfile') === 'dense';
+const mergeCellsConfig = denseMergeProfile
+  ? Array.from({ length: 28 }, (_, index) => [1, 10].map(column => ({
+      row: 3 + index * 4,
+      col: column,
+      rowspan: 2,
+      colspan: 2,
+    }))).flat()
+  : [{ row: 5, col: 1, rowspan: 2, colspan: 2 }];
 
 (globalThis as typeof globalThis & { __HOT_EXPERIMENTAL_MERGE_RECYCLING__?: boolean })
   .__HOT_EXPERIMENTAL_MERGE_RECYCLING__ = experimentalMergeRecycling;
@@ -70,11 +80,22 @@ const counters = { rendererCalls: 0, componentCreations: 0 };
       </svg>
       <span class="demo-cell__label">{{ value() }}</span>
       <span class="demo-cell__status">active</span>
+      @if (richWorkload) {
+        <svg class="demo-cell__icon demo-cell__icon--secondary" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="3" y="3" width="10" height="10" rx="2" />
+          <path d="M5 6h6M5 8h6M5 10h4" />
+        </svg>
+        <span class="demo-cell__meta"><span>Owner</span><strong>{{ value() }}</strong></span>
+        <button class="demo-cell__action" type="button" aria-label="Open cell actions">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="12" cy="8" r="1" /></svg>
+        </button>
+      }
     </span>
   `,
 })
 class CachedCellComponent {
   readonly value = input.required<string>();
+  protected readonly richWorkload = richWorkload;
 }
 
 @Component({
@@ -88,10 +109,22 @@ class CachedCellComponent {
       </svg>
       <span class="demo-cell__label">{{ value }}</span>
       <span class="demo-cell__status">active</span>
+      @if (richWorkload) {
+        <svg class="demo-cell__icon demo-cell__icon--secondary" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="3" y="3" width="10" height="10" rx="2" />
+          <path d="M5 6h6M5 8h6M5 10h4" />
+        </svg>
+        <span class="demo-cell__meta"><span>Owner</span><strong>{{ value }}</strong></span>
+        <button class="demo-cell__action" type="button" aria-label="Open cell actions">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="12" cy="8" r="1" /></svg>
+        </button>
+      }
     </span>
   `,
 })
 class OfficialCellComponent extends HotCellRendererComponent {
+  protected readonly richWorkload = richWorkload;
+
   constructor() {
     super();
     counters.componentCreations += 1;
@@ -119,9 +152,19 @@ class OfficialCellComponent extends HotCellRendererComponent {
         <a [href]="scenarioHref('onChange', true, false)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && !experimentalMergeRecycling">PR + onChange + mergeCells fallback</a>
         <a [href]="scenarioHref('onChange', true, true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && experimentalMergeRecycling">Experimental merge-aware recycling</a>
       </nav>
+      <nav aria-label="Cell workload">
+        <a [href]="workloadHref(false)" [class.selected]="!richWorkload">Standard SVG cell</a>
+        <a [href]="workloadHref(true)" [class.selected]="richWorkload">Rich Angular cell</a>
+      </nav>
+      @if (mergeCellsEnabled) {
+        <nav aria-label="Merge profile">
+          <a [href]="mergeProfileHref(false)" [class.selected]="!denseMergeProfile">1 merge</a>
+          <a [href]="mergeProfileHref(true)" [class.selected]="denseMergeProfile">56 merges</a>
+        </nav>
+      }
       @if (mergeCellsEnabled) {
         <p class="scenario-note">
-          This scenario contains a real 2 × 2 merge.
+          This scenario contains {{ mergeCellsCount }} real 2 × 2 merge{{ mergeCellsCount === 1 ? '' : 's' }}.
           @if (experimentalMergeRecycling) {
             The proof-of-concept keeps multi-pass layout, rotates rows, and repaints merge-managed cells only.
           } @else {
@@ -175,6 +218,9 @@ class AppComponent implements AfterViewInit, OnDestroy {
   readonly renderMode = renderMode;
   readonly mergeCellsEnabled = mergeCellsEnabled;
   readonly experimentalMergeRecycling = experimentalMergeRecycling;
+  readonly richWorkload = richWorkload;
+  readonly denseMergeProfile = denseMergeProfile;
+  readonly mergeCellsCount = mergeCellsConfig.length;
 
   readonly running = signal(false);
   readonly progress = signal('Running…');
@@ -278,7 +324,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
     viewportRowRenderingOffset: 10,
     viewportColumnRenderingOffset: 2,
     renderMode,
-    mergeCells: mergeCellsEnabled ? [{ row: 5, col: 1, rowspan: 2, colspan: 2 }] : false,
+    mergeCells: mergeCellsEnabled ? mergeCellsConfig : false,
     afterRenderer: () => {
       counters.rendererCalls += 1;
     },
@@ -307,6 +353,18 @@ class AppComponent implements AfterViewInit, OnDestroy {
     next.set('renderMode', nextRenderMode);
     next.set('mergeCells', nextMergeCells ? 'on' : 'off');
     next.set('mergePatch', nextMergePatch ? 'on' : 'off');
+    return `?${next.toString()}`;
+  }
+
+  workloadHref(nextRichWorkload: boolean): string {
+    const next = new URLSearchParams(params);
+    next.set('workload', nextRichWorkload ? 'rich' : 'standard');
+    return `?${next.toString()}`;
+  }
+
+  mergeProfileHref(nextDenseMergeProfile: boolean): string {
+    const next = new URLSearchParams(params);
+    next.set('mergeProfile', nextDenseMergeProfile ? 'dense' : 'single');
     return `?${next.toString()}`;
   }
 
