@@ -25,7 +25,7 @@ registerAllModules();
 
 const params = new URLSearchParams(location.search);
 const ROWS = Number(params.get('rows') ?? 114);
-const COLUMNS = Number(params.get('cols') ?? 128);
+const COLUMNS = Number(params.get('cols') ?? 40);
 const TABLE_WIDTH = Number(params.get('tableWidth') ?? 3_054);
 const TABLE_HEIGHT = Number(params.get('tableHeight') ?? 1_946);
 const COLUMN_WIDTH = Number(params.get('columnWidth') ?? 162);
@@ -37,14 +37,21 @@ const mergeCellsEnabled = params.get('mergeCells') === 'on';
 const experimentalMergeRecycling = params.get('mergePatch') === 'on';
 const richWorkload = params.get('workload') === 'rich';
 const denseMergeProfile = params.get('mergeProfile') === 'dense';
-const mergeCellsConfig = denseMergeProfile
-  ? Array.from({ length: 28 }, (_, index) => [1, 10].map(column => ({
-      row: 3 + index * 4,
-      col: column,
-      rowspan: 2,
-      colspan: 2,
-    }))).flat()
-  : [{ row: 5, col: 1, rowspan: 2, colspan: 2 }];
+const RELATION_COLUMNS = new Set([8, 9, 10]);
+const expandedGroupStarts = mergeCellsEnabled
+  ? denseMergeProfile
+    ? Array.from({ length: Math.floor((ROWS - 3) / 6) + 1 }, (_, index) => 1 + index * 6)
+        .filter(row => row + 2 < ROWS)
+    : [5]
+  : [];
+const expandedGroupByRow = new Map(
+  expandedGroupStarts.flatMap(start => Array.from({ length: 3 }, (_, offset) => [start + offset, { start, offset }] as const)),
+);
+const mergeCellsConfig = expandedGroupStarts.flatMap(row =>
+  Array.from({ length: COLUMNS }, (_, col) => col)
+    .filter(col => !RELATION_COLUMNS.has(col))
+    .map(col => ({ row, col, rowspan: 3, colspan: 1 })),
+);
 
 (globalThis as typeof globalThis & { __HOT_EXPERIMENTAL_MERGE_RECYCLING__?: boolean })
   .__HOT_EXPERIMENTAL_MERGE_RECYCLING__ = experimentalMergeRecycling;
@@ -158,13 +165,14 @@ class OfficialCellComponent extends HotCellRendererComponent {
       </nav>
       @if (mergeCellsEnabled) {
         <nav aria-label="Merge profile">
-          <a [href]="mergeProfileHref(false)" [class.selected]="!denseMergeProfile">1 merge</a>
-          <a [href]="mergeProfileHref(true)" [class.selected]="denseMergeProfile">56 merges</a>
+          <a [href]="mergeProfileHref(false)" [class.selected]="!denseMergeProfile">1 expanded group</a>
+          <a [href]="mergeProfileHref(true)" [class.selected]="denseMergeProfile">{{ expandedGroupCount }} expanded groups</a>
         </nav>
       }
       @if (mergeCellsEnabled) {
         <p class="scenario-note">
-          This scenario contains {{ mergeCellsCount }} real 2 × 2 merge{{ mergeCellsCount === 1 ? '' : 's' }}.
+          Inventory-shaped data: {{ mergeCellsCount }} vertical rowspan × 1 merges across
+          {{ expandedGroupCount }} group{{ expandedGroupCount === 1 ? '' : 's' }}. Relation columns remain unmerged.
           @if (experimentalMergeRecycling) {
             The proof-of-concept keeps multi-pass layout, rotates rows, and repaints merge-managed cells only.
           } @else {
@@ -221,13 +229,21 @@ class AppComponent implements AfterViewInit, OnDestroy {
   readonly richWorkload = richWorkload;
   readonly denseMergeProfile = denseMergeProfile;
   readonly mergeCellsCount = mergeCellsConfig.length;
+  readonly expandedGroupCount = expandedGroupStarts.length;
 
   readonly running = signal(false);
   readonly progress = signal('Running…');
   readonly metrics = signal<RunMetrics>(this.emptyMetrics());
-  readonly data = Array.from({ length: ROWS }, (_, row) =>
-    Array.from({ length: COLUMNS }, (_, column) => `Item ${row + 1}.${column + 1}`),
-  );
+  readonly data = Array.from({ length: ROWS }, (_, row) => {
+    const expandedGroup = expandedGroupByRow.get(row);
+    return Array.from({ length: COLUMNS }, (_, column) => {
+      if (!expandedGroup) return `Item ${row + 1}.${column + 1}`;
+      if (RELATION_COLUMNS.has(column)) {
+        return `Relation ${expandedGroup.start + 1}.${expandedGroup.offset + 1}`;
+      }
+      return expandedGroup.offset === 0 ? `Fact sheet ${expandedGroup.start + 1}` : '';
+    });
+  });
 
   private readonly snapshotRenderer: BaseRenderer = (
     instance,

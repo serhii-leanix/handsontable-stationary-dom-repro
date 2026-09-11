@@ -11,11 +11,13 @@ For the representative stress case select:
 - `Official Angular component renderer`;
 - either `PR + onChange + mergeCells fallback` or `Experimental merge-aware recycling`;
 - `Rich Angular cell`;
-- `56 merges`.
+- `19 expanded groups`.
 
-The rich cell contains multiple SVG and nested HTML elements, but no synthetic CPU loop. The dense
-profile contains 56 non-overlapping real 2 × 2 merges distributed through the data. Both scenarios use
-the same 114 × 128 dataset, 3054 × 1946 viewport, and 2.5-second vertical scroll.
+The rich cell contains multiple SVG and nested HTML elements, but no synthetic CPU loop. The data
+models the Inventory expanded-relation layout: a source row followed by two synthetic relation rows.
+Three relation columns remain independent, while every non-relation column spans the three-row group.
+Across 19 groups and 40 columns, this produces 703 real `rowspan: 3, colspan: 1` merges. Both scenarios
+use the same 114-row dataset, 3054 × 1946 viewport, and 2.5-second vertical scroll.
 
 ## Proof-of-concept
 
@@ -34,15 +36,15 @@ Medians from five automated Chromium runs:
 
 | Metric | PR merge fallback | Merge-aware prototype |
 | --- | ---: | ---: |
-| Renderer calls | 3,108 | 760 |
-| Angular components created | 189 | 231 |
+| Renderer calls | 3,192 | 1,692 |
+| Angular components created | 252 | 252 |
 | p95 frame | 16.8 ms | 16.8 ms |
 | Frames over 50 ms | 2 | 2 |
-| Long tasks | 2 / 353 ms | 2 / 139 ms |
+| Long tasks | 2 / 315 ms | 2 / 193 ms |
 
-The fallback blocks animation long enough to skip more intermediate virtual bands, which explains its
-lower component-creation count. The prototype reduces renderer calls by about 76% and total long-task
-time by about 61%.
+The prototype reduces renderer calls by about 47% and total long-task time by about 39%. The gain is
+smaller than with sparse rectangular merges because the Inventory-shaped profile intentionally places
+most non-relation cells inside vertically merged groups.
 
 DOM state was compared against the unmodified fallback while scrolling through rows
 0 → 20 → 40 → 60 → 80 → 100 → 60 → 20 → 0. All common rendered logical cells had identical text,
