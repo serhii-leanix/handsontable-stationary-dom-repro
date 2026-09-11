@@ -34,6 +34,10 @@ const SCROLL_DISTANCE = 1_000;
 const SCROLL_DURATION = 2_500;
 const renderMode = params.get('renderMode') === 'always' ? 'always' : 'onChange';
 const mergeCellsEnabled = params.get('mergeCells') === 'on';
+const experimentalMergeRecycling = params.get('mergePatch') === 'on';
+
+(globalThis as typeof globalThis & { __HOT_EXPERIMENTAL_MERGE_RECYCLING__?: boolean })
+  .__HOT_EXPERIMENTAL_MERGE_RECYCLING__ = experimentalMergeRecycling;
 
 type RendererMode = 'snapshot' | 'recommended' | 'official';
 
@@ -110,20 +114,25 @@ class OfficialCellComponent extends HotCellRendererComponent {
       </nav>
 
       <nav aria-label="Engine scenario">
-        <a [href]="scenarioHref('always', false)" [class.selected]="renderMode === 'always' && !mergeCellsEnabled">PR default</a>
-        <a [href]="scenarioHref('onChange', false)" [class.selected]="renderMode === 'onChange' && !mergeCellsEnabled">PR + renderMode: onChange</a>
-        <a [href]="scenarioHref('onChange', true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled">PR + onChange + mergeCells</a>
+        <a [href]="scenarioHref('always', false, false)" [class.selected]="renderMode === 'always' && !mergeCellsEnabled">PR default</a>
+        <a [href]="scenarioHref('onChange', false, false)" [class.selected]="renderMode === 'onChange' && !mergeCellsEnabled">PR + renderMode: onChange</a>
+        <a [href]="scenarioHref('onChange', true, false)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && !experimentalMergeRecycling">PR + onChange + mergeCells fallback</a>
+        <a [href]="scenarioHref('onChange', true, true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && experimentalMergeRecycling">Experimental merge-aware recycling</a>
       </nav>
       @if (mergeCellsEnabled) {
         <p class="scenario-note">
-          This real 2 × 2 merge requires multi-pass layout. The PR intentionally disables stationary row recycling,
-          so <code>onChange</code> cannot skip renderer calls in this scenario.
+          This scenario contains a real 2 × 2 merge.
+          @if (experimentalMergeRecycling) {
+            The proof-of-concept keeps multi-pass layout, rotates rows, and repaints merge-managed cells only.
+          } @else {
+            The PR fallback disables stationary row recycling for the complete table.
+          }
         </p>
       }
 
       <section class="toolbar">
         <div><strong>Mode:</strong> {{ modeLabel }}</div>
-        <div><strong>Engine:</strong> {{ renderMode }} · mergeCells {{ mergeCellsEnabled ? 'on' : 'off' }}</div>
+        <div><strong>Engine:</strong> {{ renderMode }} · mergeCells {{ mergeCellsEnabled ? 'on' : 'off' }} · patch {{ experimentalMergeRecycling ? 'on' : 'off' }}</div>
         <button type="button" (click)="runBenchmark()" [disabled]="running()">
           {{ running() ? progress() : 'Run identical smooth scroll' }}
         </button>
@@ -165,6 +174,7 @@ class AppComponent implements AfterViewInit, OnDestroy {
   readonly hotVersion = Handsontable.version;
   readonly renderMode = renderMode;
   readonly mergeCellsEnabled = mergeCellsEnabled;
+  readonly experimentalMergeRecycling = experimentalMergeRecycling;
 
   readonly running = signal(false);
   readonly progress = signal('Running…');
@@ -288,10 +298,15 @@ class AppComponent implements AfterViewInit, OnDestroy {
     return `?${next.toString()}`;
   }
 
-  scenarioHref(nextRenderMode: 'always' | 'onChange', nextMergeCells: boolean): string {
+  scenarioHref(
+    nextRenderMode: 'always' | 'onChange',
+    nextMergeCells: boolean,
+    nextMergePatch: boolean,
+  ): string {
     const next = new URLSearchParams(params);
     next.set('renderMode', nextRenderMode);
     next.set('mergeCells', nextMergeCells ? 'on' : 'off');
+    next.set('mergePatch', nextMergePatch ? 'on' : 'off');
     return `?${next.toString()}`;
   }
 

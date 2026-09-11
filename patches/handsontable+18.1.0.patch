@@ -1,0 +1,80 @@
+diff --git a/node_modules/handsontable/3rdparty/walkontable/src/render/cells.js b/node_modules/handsontable/3rdparty/walkontable/src/render/cells.js
+index 663b1b4..97306ff 100644
+--- a/node_modules/handsontable/3rdparty/walkontable/src/render/cells.js
++++ b/node_modules/handsontable/3rdparty/walkontable/src/render/cells.js
+@@ -38,7 +38,7 @@ class CellsRenderer extends _base.BaseRenderer {
+         // layout MergeCells can be active in, and it clamps a merged cell's span to the rendered band,
+         // so such a cell needs a paint when the band moves or resizes even though its coordinates did
+         // not change.
+-        const band = this.table.hasStationaryBands() ? activeOverlayName : [
++        const viewportBand = [
+             activeOverlayName,
+             rowFilter?.offset ?? 0,
+             rowsToRender,
+@@ -61,6 +61,10 @@ class CellsRenderer extends _base.BaseRenderer {
+                 if (!TD) {
+                     continue; // eslint-disable-line no-continue
+                 }
++                // Proof of concept: merged anchors and covered cells still depend on the viewport
++                // because MergeCells clamps their span. Ordinary cells can retain a stationary stamp.
++                const mergeManaged = TD.style.display === 'none' || TD.hasAttribute('rowspan') || TD.hasAttribute('colspan');
++                const band = this.table.hasStationaryBands() && !mergeManaged ? activeOverlayName : viewportBand;
+                 // The host may keep the element as it is (`renderMode: 'onChange'`); then nothing below runs.
+                 if (!this.table.shouldPaintCell(sourceRowIndex, sourceColumnIndex, TD, band)) {
+                     continue; // eslint-disable-line no-continue
+diff --git a/node_modules/handsontable/3rdparty/walkontable/src/render/cells.mjs b/node_modules/handsontable/3rdparty/walkontable/src/render/cells.mjs
+index d2c5706..cd05e44 100644
+--- a/node_modules/handsontable/3rdparty/walkontable/src/render/cells.mjs
++++ b/node_modules/handsontable/3rdparty/walkontable/src/render/cells.mjs
+@@ -40,7 +40,7 @@ import { A11Y_COLINDEX, A11Y_GRIDCELL, A11Y_TABINDEX } from '../../../../helpers
+         // layout MergeCells can be active in, and it clamps a merged cell's span to the rendered band,
+         // so such a cell needs a paint when the band moves or resizes even though its coordinates did
+         // not change.
+-        const band = this.table.hasStationaryBands() ? activeOverlayName : [
++        const viewportBand = [
+             activeOverlayName,
+             rowFilter?.offset ?? 0,
+             rowsToRender,
+@@ -63,6 +63,10 @@ import { A11Y_COLINDEX, A11Y_GRIDCELL, A11Y_TABINDEX } from '../../../../helpers
+                 if (!TD) {
+                     continue; // eslint-disable-line no-continue
+                 }
++                // Proof of concept: merged anchors and covered cells still depend on the viewport
++                // because MergeCells clamps their span. Ordinary cells can retain a stationary stamp.
++                const mergeManaged = TD.style.display === 'none' || TD.hasAttribute('rowspan') || TD.hasAttribute('colspan');
++                const band = this.table.hasStationaryBands() && !mergeManaged ? activeOverlayName : viewportBand;
+                 // The host may keep the element as it is (`renderMode: 'onChange'`); then nothing below runs.
+                 if (!this.table.shouldPaintCell(sourceRowIndex, sourceColumnIndex, TD, band)) {
+                     continue; // eslint-disable-line no-continue
+diff --git a/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.js b/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.js
+index 443efc1..0f98ca4 100644
+--- a/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.js
++++ b/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.js
+@@ -333,8 +333,9 @@ const calculatorFactory = {
+    *
+    * @this Viewport
+    * @returns {boolean}
+-   */ allowsStationaryBands () {
+-        return this.wtSettings.getSetting('singlePassLayout') && !this.isVerticallyScrollableByWindow() && !this.isHorizontallyScrollableByWindow();
++   */ allowsStationaryBands () {
++        const experimentalMergeRecycling = globalThis.__HOT_EXPERIMENTAL_MERGE_RECYCLING__ === true;
++        return (this.wtSettings.getSetting('singlePassLayout') || experimentalMergeRecycling) && !this.isVerticallyScrollableByWindow() && !this.isHorizontallyScrollableByWindow();
+     },
+     /**
+    * Extends the freshly computed rendered column band by up to {@link COLUMN_BAND_OVERSCAN_MAX}
+diff --git a/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.mjs b/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.mjs
+index fa57eb4..d4c172c 100644
+--- a/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.mjs
++++ b/node_modules/handsontable/3rdparty/walkontable/src/viewport/calculatorFactory.mjs
+@@ -346,8 +346,9 @@
+    *
+    * @this Viewport
+    * @returns {boolean}
+-   */ allowsStationaryBands () {
+-        return this.wtSettings.getSetting('singlePassLayout') && !this.isVerticallyScrollableByWindow() && !this.isHorizontallyScrollableByWindow();
++   */ allowsStationaryBands () {
++        const experimentalMergeRecycling = globalThis.__HOT_EXPERIMENTAL_MERGE_RECYCLING__ === true;
++        return (this.wtSettings.getSetting('singlePassLayout') || experimentalMergeRecycling) && !this.isVerticallyScrollableByWindow() && !this.isHorizontallyScrollableByWindow();
+     },
+     /**
+    * Extends the freshly computed rendered column band by up to {@link COLUMN_BAND_OVERSCAN_MAX}
