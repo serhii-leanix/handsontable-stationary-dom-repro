@@ -34,7 +34,6 @@ const SCROLL_DISTANCE = 1_000;
 const SCROLL_DURATION = 2_500;
 const renderMode = params.get('renderMode') === 'always' ? 'always' : 'onChange';
 const mergeCellsEnabled = params.get('mergeCells') === 'on';
-const experimentalMergeRecycling = params.get('mergePatch') === 'on';
 const richWorkload = params.get('workload') === 'rich';
 const denseMergeProfile = params.get('mergeProfile') === 'dense';
 const RELATION_COLUMNS = new Set([8, 9, 10]);
@@ -52,9 +51,6 @@ const mergeCellsConfig = expandedGroupStarts.flatMap(row =>
     .filter(col => !RELATION_COLUMNS.has(col))
     .map(col => ({ row, col, rowspan: 3, colspan: 1 })),
 );
-
-(globalThis as typeof globalThis & { __HOT_EXPERIMENTAL_MERGE_RECYCLING__?: boolean })
-  .__HOT_EXPERIMENTAL_MERGE_RECYCLING__ = experimentalMergeRecycling;
 
 type RendererMode = 'snapshot' | 'recommended' | 'official';
 
@@ -149,15 +145,15 @@ class OfficialCellComponent extends HotCellRendererComponent {
 
       <nav aria-label="Renderer mode">
         <a [href]="rendererHref('snapshot')" [class.selected]="mode === 'snapshot'">Legacy HTML snapshot renderer</a>
-        <a [href]="rendererHref('recommended')" [class.selected]="mode === 'recommended'">Recommended cached component renderer</a>
+        <a [href]="rendererHref('recommended')" [class.selected]="mode === 'recommended'">Coordinate-keyed component cache</a>
         <a [href]="rendererHref('official')" [class.selected]="mode === 'official'">Official Angular component renderer</a>
       </nav>
 
       <nav aria-label="Engine scenario">
-        <a [href]="scenarioHref('always', false, false)" [class.selected]="renderMode === 'always' && !mergeCellsEnabled">PR default</a>
-        <a [href]="scenarioHref('onChange', false, false)" [class.selected]="renderMode === 'onChange' && !mergeCellsEnabled">PR + renderMode: onChange</a>
-        <a [href]="scenarioHref('onChange', true, false)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && !experimentalMergeRecycling">PR + onChange + mergeCells fallback</a>
-        <a [href]="scenarioHref('onChange', true, true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled && experimentalMergeRecycling">Experimental merge-aware recycling</a>
+        <a [href]="scenarioHref('always', false)" [class.selected]="renderMode === 'always' && !mergeCellsEnabled">PR default</a>
+        <a [href]="scenarioHref('onChange', false)" [class.selected]="renderMode === 'onChange' && !mergeCellsEnabled">PR + renderMode: onChange</a>
+        <a [href]="scenarioHref('always', true)" [class.selected]="renderMode === 'always' && mergeCellsEnabled">PR + mergeCells</a>
+        <a [href]="scenarioHref('onChange', true)" [class.selected]="renderMode === 'onChange' && mergeCellsEnabled">PR + onChange + mergeCells</a>
       </nav>
       <nav aria-label="Cell workload">
         <a [href]="workloadHref(false)" [class.selected]="!richWorkload">Standard SVG cell</a>
@@ -173,17 +169,13 @@ class OfficialCellComponent extends HotCellRendererComponent {
         <p class="scenario-note">
           Inventory-shaped data: {{ mergeCellsCount }} vertical rowspan × 1 merges across
           {{ expandedGroupCount }} group{{ expandedGroupCount === 1 ? '' : 's' }}. Relation columns remain unmerged.
-          @if (experimentalMergeRecycling) {
-            The proof-of-concept keeps multi-pass layout, rotates rows, and repaints merge-managed cells only.
-          } @else {
-            The PR fallback disables stationary row recycling for the complete table.
-          }
+          The upstream implementation keeps row recycling active and repaints only merge-managed cells.
         </p>
       }
 
       <section class="toolbar">
         <div><strong>Mode:</strong> {{ modeLabel }}</div>
-        <div><strong>Engine:</strong> {{ renderMode }} · mergeCells {{ mergeCellsEnabled ? 'on' : 'off' }} · patch {{ experimentalMergeRecycling ? 'on' : 'off' }}</div>
+        <div><strong>Engine:</strong> {{ renderMode }} · mergeCells {{ mergeCellsEnabled ? 'on' : 'off' }}</div>
         <button type="button" (click)="runBenchmark()" [disabled]="running()">
           {{ running() ? progress() : 'Run identical smooth scroll' }}
         </button>
@@ -220,12 +212,11 @@ class AppComponent implements AfterViewInit, OnDestroy {
   readonly modeLabel = this.mode === 'snapshot'
     ? 'Legacy HTML snapshot renderer'
     : this.mode === 'recommended'
-      ? 'Recommended cached component renderer'
+      ? 'Coordinate-keyed component cache'
       : 'Official Angular component renderer';
   readonly hotVersion = Handsontable.version;
   readonly renderMode = renderMode;
   readonly mergeCellsEnabled = mergeCellsEnabled;
-  readonly experimentalMergeRecycling = experimentalMergeRecycling;
   readonly richWorkload = richWorkload;
   readonly denseMergeProfile = denseMergeProfile;
   readonly mergeCellsCount = mergeCellsConfig.length;
@@ -363,12 +354,11 @@ class AppComponent implements AfterViewInit, OnDestroy {
   scenarioHref(
     nextRenderMode: 'always' | 'onChange',
     nextMergeCells: boolean,
-    nextMergePatch: boolean,
   ): string {
     const next = new URLSearchParams(params);
     next.set('renderMode', nextRenderMode);
     next.set('mergeCells', nextMergeCells ? 'on' : 'off');
-    next.set('mergePatch', nextMergePatch ? 'on' : 'off');
+    next.delete('mergePatch');
     return `?${next.toString()}`;
   }
 
